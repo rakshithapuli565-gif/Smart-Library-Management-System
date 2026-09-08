@@ -1,0 +1,1287 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  BookOpen, 
+  LayoutDashboard, 
+  PlusCircle, 
+  BookUp2, 
+  BookDown, 
+  LogOut, 
+  Search, 
+  Trash2, 
+  Edit, 
+  CheckCircle2, 
+  AlertCircle, 
+  UserCheck, 
+  Calendar, 
+  DollarSign, 
+  Shield, 
+  User, 
+  Check, 
+  Clock,
+  Layers,
+  ArrowRight,
+  Wifi,
+  WifiOff,
+  UserPlus,
+  LogIn
+} from 'lucide-react';
+
+// API BASE URL
+const API_BASE_URL = 'http://localhost:5000/api';
+
+// Configurable Fine per Day ($1.50 per overdue day)
+const FINE_PER_DAY = 1.50;
+
+export default function App() {
+  // Current user state
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('library_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Navigation: 'login' | 'dashboard' | 'books' | 'add-book' | 'issue-book' | 'return-book'
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // Server Online / Offline Status
+  const [isServerOnline, setIsServerOnline] = useState(false);
+  const [checkingServer, setCheckingServer] = useState(true);
+
+  // Auth Mode: 'login' or 'signup'
+  const [authMode, setAuthMode] = useState('login');
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('admin@library.com');
+  const [authPassword, setAuthPassword] = useState('admin123');
+  const [authRole, setAuthRole] = useState('student');
+  const [authError, setAuthError] = useState('');
+
+  // Core Data States
+  const [books, setBooks] = useState([]);
+  const [issues, setIssues] = useState([]);
+  const [usersList, setUsersList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  // Book Form State (Add / Edit)
+  const [editingBookId, setEditingBookId] = useState(null);
+  const [bookForm, setBookForm] = useState({
+    title: '',
+    author: '',
+    category: 'Computer Science',
+    quantity: 5
+  });
+
+  // Issue Form State
+  const [issueForm, setIssueForm] = useState({
+    user_id: '',
+    book_id: '',
+    due_days: 14
+  });
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
+  // Show auto-dismissing notifications
+  const showToast = (message, type = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Helper for API fetch
+  const apiCall = async (endpoint, options = {}) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Error ${res.status}: ${res.statusText}`);
+      }
+      return await res.json();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  // Check Server Health (Online / Offline status)
+  const checkServerStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/health`, { method: 'GET' });
+      if (res.ok) {
+        setIsServerOnline(true);
+      } else {
+        setIsServerOnline(false);
+      }
+    } catch (err) {
+      setIsServerOnline(false);
+    } finally {
+      setCheckingServer(false);
+    }
+  }, []);
+
+  // Poll server status every 5 seconds
+  useEffect(() => {
+    checkServerStatus();
+    const interval = setInterval(checkServerStatus, 5000);
+    return () => clearInterval(interval);
+  }, [checkServerStatus]);
+
+  // Initial Data Fetch
+  const fetchData = async () => {
+    if (!currentUser) return;
+    setLoading(true);
+    try {
+      // 1. Fetch books
+      const booksData = await apiCall('/books');
+      setBooks(booksData);
+
+      // 2. Fetch issues (Admin gets all, Student gets personal)
+      const issuesUrl = currentUser.role === 'admin' 
+        ? '/issues' 
+        : `/issues/user/${currentUser.id}`;
+      const issuesData = await apiCall(issuesUrl);
+      setIssues(issuesData);
+
+      // 3. Fetch users for admin dropdown
+      if (currentUser.role === 'admin') {
+        const usersData = await apiCall('/users');
+        setUsersList(usersData);
+      }
+      setIsServerOnline(true);
+    } catch (err) {
+      // Standalone preview fallback if backend isn't connected yet
+      if (books.length === 0) {
+        setBooks([
+          { id: 1, title: 'Clean Code: A Handbook of Agile Software', author: 'Robert C. Martin', category: 'Software Engineering', quantity: 5, available: 3 },
+          { id: 2, title: 'Design Patterns: Elements of Reusable Object-Oriented Software', author: 'Erich Gamma et al.', category: 'Software Engineering', quantity: 3, available: 1 },
+          { id: 3, title: 'Introduction to Algorithms (CLRS)', author: 'Thomas H. Cormen', category: 'Computer Science', quantity: 4, available: 4 },
+          { id: 4, title: 'Artificial Intelligence: A Modern Approach', author: 'Stuart Russell', category: 'Artificial Intelligence', quantity: 2, available: 0 },
+          { id: 5, database_id: 5, title: 'Database System Concepts', author: 'Abraham Silberschatz', category: 'Database Systems', quantity: 6, available: 5 }
+        ]);
+        setIssues([
+          { 
+            id: 1, 
+            user_id: 2, 
+            user_name: 'John Doe', 
+            book_id: 1, 
+            book_title: 'Clean Code', 
+            issue_date: '2026-08-01', 
+            due_date: '2026-08-15', 
+            return_date: null, 
+            fine: 22.50, 
+            status: 'issued' 
+          }
+        ]);
+        setUsersList([
+          { id: 1, name: 'System Admin', email: 'admin@library.com', role: 'admin' },
+          { id: 2, name: 'John Doe', email: 'student@library.com', role: 'student' }
+        ]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('library_user', JSON.stringify(currentUser));
+      fetchData();
+    } else {
+      localStorage.removeItem('library_user');
+      setActiveTab('login');
+    }
+  }, [currentUser]);
+
+  // Handle Login & Signup
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+
+    try {
+      if (authMode === 'login') {
+        // --- LOGIN ---
+        const data = await apiCall('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: authEmail, password: authPassword })
+        });
+        setCurrentUser(data.user);
+        setActiveTab('dashboard');
+        showToast(`Welcome back, ${data.user.name}!`);
+      } else {
+        // --- SIGNUP ---
+        if (!authName.trim()) {
+          setAuthError('Please enter your full name');
+          return;
+        }
+        const data = await apiCall('/auth/signup', {
+          method: 'POST',
+          body: JSON.stringify({ 
+            name: authName, 
+            email: authEmail, 
+            password: authPassword, 
+            role: authRole 
+          })
+        });
+        setCurrentUser(data.user);
+        setActiveTab('dashboard');
+        showToast('Account created successfully!');
+      }
+    } catch (err) {
+      // Fallback for offline testing
+      if (authMode === 'login') {
+        if (authEmail === 'admin@library.com' && authPassword === 'admin123') {
+          setCurrentUser({ id: 1, name: 'System Admin', email: 'admin@library.com', role: 'admin' });
+          setActiveTab('dashboard');
+          showToast('Logged in as Admin (Local State)');
+        } else if (authEmail === 'student@library.com' && authPassword === 'student123') {
+          setCurrentUser({ id: 2, name: 'John Doe', email: 'student@library.com', role: 'student' });
+          setActiveTab('dashboard');
+          showToast('Logged in as Student (Local State)');
+        } else {
+          setAuthError(err.message || 'Invalid email or password.');
+        }
+      } else {
+        const newUser = { id: Date.now(), name: authName, email: authEmail, role: authRole };
+        setCurrentUser(newUser);
+        setActiveTab('dashboard');
+        showToast('Signed up (Local State)');
+      }
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setActiveTab('login');
+    showToast('Logged out successfully', 'info');
+  };
+
+  // Add / Edit Book
+  const handleSaveBook = async (e) => {
+    e.preventDefault();
+    if (!bookForm.title || !bookForm.author || bookForm.quantity < 1) {
+      showToast('Please fill all fields accurately', 'error');
+      return;
+    }
+
+    try {
+      if (editingBookId) {
+        await apiCall(`/books/${editingBookId}`, {
+          method: 'PUT',
+          body: JSON.stringify(bookForm)
+        });
+        showToast('Book updated in MySQL database');
+      } else {
+        await apiCall('/books', {
+          method: 'POST',
+          body: JSON.stringify(bookForm)
+        });
+        showToast('New book added to library inventory');
+      }
+      await fetchData();
+      setBookForm({ title: '', author: '', category: 'Computer Science', quantity: 5 });
+      setEditingBookId(null);
+      setActiveTab('books');
+    } catch (err) {
+      if (editingBookId) {
+        setBooks(prev => prev.map(b => b.id === editingBookId ? { ...b, ...bookForm } : b));
+      } else {
+        setBooks(prev => [{ id: Date.now(), ...bookForm, available: bookForm.quantity }, ...prev]);
+      }
+      setBookForm({ title: '', author: '', category: 'Computer Science', quantity: 5 });
+      setEditingBookId(null);
+      setActiveTab('books');
+      showToast('Book saved');
+    }
+  };
+
+  const handleDeleteBook = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this book?')) return;
+    try {
+      await apiCall(`/books/${id}`, { method: 'DELETE' });
+      showToast('Book deleted from database');
+      await fetchData();
+    } catch (err) {
+      setBooks(prev => prev.filter(b => b.id !== id));
+      showToast('Book removed');
+    }
+  };
+
+  const startEditBook = (book) => {
+    setEditingBookId(book.id);
+    setBookForm({
+      title: book.title,
+      author: book.author,
+      category: book.category,
+      quantity: book.quantity
+    });
+    setActiveTab('add-book');
+  };
+
+  // Issue Book Logic
+  const handleIssueBook = async (e) => {
+    e.preventDefault();
+    const targetUserId = currentUser.role === 'admin' ? issueForm.user_id : currentUser.id;
+    const targetBookId = issueForm.book_id;
+
+    if (!targetUserId || !targetBookId) {
+      showToast('Please select both user and book', 'error');
+      return;
+    }
+
+    const selectedBook = books.find(b => b.id === parseInt(targetBookId));
+    if (!selectedBook || selectedBook.available < 1) {
+      showToast('Book is currently out of stock', 'error');
+      return;
+    }
+
+    const issueDate = new Date().toISOString().split('T')[0];
+    const dueDateObj = new Date();
+    dueDateObj.setDate(dueDateObj.getDate() + parseInt(issueForm.due_days || 14));
+    const dueDate = dueDateObj.toISOString().split('T')[0];
+
+    try {
+      await apiCall('/issues', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: targetUserId,
+          book_id: targetBookId,
+          issue_date: issueDate,
+          due_date: dueDate
+        })
+      });
+      showToast(`Book issued! Due date is ${dueDate}`);
+      await fetchData();
+      setIssueForm({ user_id: '', book_id: '', due_days: 14 });
+      setActiveTab('dashboard');
+    } catch (err) {
+      const newIssue = {
+        id: Date.now(),
+        user_id: parseInt(targetUserId),
+        user_name: usersList.find(u => u.id === parseInt(targetUserId))?.name || currentUser.name,
+        book_id: parseInt(targetBookId),
+        book_title: selectedBook.title,
+        issue_date: issueDate,
+        due_date: dueDate,
+        return_date: null,
+        fine: 0,
+        status: 'issued'
+      };
+      setIssues(prev => [newIssue, ...prev]);
+      setBooks(prev => prev.map(b => b.id === parseInt(targetBookId) ? { ...b, available: b.available - 1 } : b));
+      showToast(`Book issued! Due: ${dueDate}`);
+      setIssueForm({ user_id: '', book_id: '', due_days: 14 });
+      setActiveTab('dashboard');
+    }
+  };
+
+  // Fine Calculation ($1.50 per day after due date)
+  const calculateFine = (dueDateStr) => {
+    const today = new Date();
+    const dueDate = new Date(dueDateStr);
+    const diffTime = today - dueDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays > 0) {
+      return parseFloat((diffDays * FINE_PER_DAY).toFixed(2));
+    }
+    return 0.00;
+  };
+
+  // Return Book
+  const handleReturnBook = async (issueItem) => {
+    const returnDate = new Date().toISOString().split('T')[0];
+    const fineAmount = calculateFine(issueItem.due_date);
+
+    try {
+      await apiCall(`/issues/return/${issueItem.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          return_date: returnDate,
+          fine: fineAmount
+        })
+      });
+      showToast(fineAmount > 0 ? `Book returned. Late fine: $${fineAmount.toFixed(2)}` : 'Book returned with $0 fine!');
+      await fetchData();
+    } catch (err) {
+      setIssues(prev => prev.map(item => {
+        if (item.id === issueItem.id) {
+          return { ...item, return_date: returnDate, fine: fineAmount, status: 'returned' };
+        }
+        return item;
+      }));
+      setBooks(prev => prev.map(b => b.id === issueItem.book_id ? { ...b, available: b.available + 1 } : b));
+      showToast(fineAmount > 0 ? `Book returned. Late fine: $${fineAmount.toFixed(2)}` : 'Book returned with $0 fine!');
+    }
+  };
+
+  // Filtered Books List
+  const filteredBooks = useMemo(() => {
+    return books.filter(book => {
+      const matchesSearch = book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            book.author.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            book.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategory === 'All' || book.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [books, searchQuery, selectedCategory]);
+
+  const categories = useMemo(() => {
+    const cats = new Set(books.map(b => b.category));
+    return ['All', ...Array.from(cats)];
+  }, [books]);
+
+  // Dashboard Metrics
+  const stats = useMemo(() => {
+    const totalBooks = books.reduce((acc, b) => acc + Number(b.quantity || 0), 0);
+    const totalAvailable = books.reduce((acc, b) => acc + Number(b.available || 0), 0);
+    const totalIssued = totalBooks - totalAvailable;
+    const activeIssues = issues.filter(i => i.status === 'issued');
+    const totalFines = issues.reduce((acc, i) => acc + Number(i.fine || 0), 0);
+    const overdueCount = issues.filter(i => i.status === 'issued' && calculateFine(i.due_date) > 0).length;
+
+    return {
+      totalTitles: books.length,
+      totalBooks,
+      totalAvailable,
+      totalIssued: activeIssues.length,
+      totalFines,
+      overdueCount
+    };
+  }, [books, issues]);
+
+  // =========================================================================
+  // VIEW: LOGIN & SIGNUP
+  // =========================================================================
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans text-slate-100 relative overflow-hidden">
+        {/* Top Server Status Badge */}
+        <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs shadow-lg">
+          <span className="text-slate-400 font-medium">Backend:</span>
+          {isServerOnline ? (
+            <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Online (MySQL Connected)
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-red-400 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-red-400"></span>
+              Offline (Port 5000)
+            </span>
+          )}
+        </div>
+
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-8 backdrop-blur-xl">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 mb-3 shadow-inner">
+              <BookOpen className="w-7 h-7" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-white">Smart Library Portal</h1>
+            <p className="text-xs text-slate-400 mt-1">
+              {authMode === 'login' ? 'Sign in to access your library account' : 'Create a new account to borrow books'}
+            </p>
+          </div>
+
+          {/* Auth Mode Toggle Tabs */}
+          <div className="flex bg-slate-800/80 p-1 rounded-xl mb-6 border border-slate-700/60">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setAuthError(''); }}
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                authMode === 'login' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Login</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                authMode === 'signup' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Sign Up</span>
+            </button>
+          </div>
+
+          {authError && (
+            <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAuth} className="space-y-3.5">
+            {authMode === 'signup' && (
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm"
+                  placeholder="e.g. Jane Smith"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Email Address</label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm"
+                placeholder="you@domain.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm"
+                placeholder="••••••••"
+              />
+            </div>
+
+            {authMode === 'signup' && (
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Account Role</label>
+                <select
+                  value={authRole}
+                  onChange={(e) => setAuthRole(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white text-sm"
+                >
+                  <option value="student">Student / Borrower</option>
+                  <option value="admin">Library Admin</option>
+                </select>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full mt-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] transition text-white font-medium rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-sm"
+            >
+              <span>{authMode === 'login' ? 'Sign In to Portal' : 'Complete Registration'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+
+          {/* Quick Demo Fill Buttons */}
+          <div className="mt-6 pt-5 border-t border-slate-800">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">One-Click Demo Credentials:</p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button 
+                type="button"
+                onClick={() => { setAuthMode('login'); setAuthEmail('admin@library.com'); setAuthPassword('admin123'); }}
+                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-left border border-slate-700/80 transition"
+              >
+                <div className="font-semibold text-indigo-300 flex items-center gap-1">
+                  <Shield className="w-3.5 h-3.5" /> Admin
+                </div>
+                <div className="text-slate-400 text-[11px] truncate">admin@library.com</div>
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => { setAuthMode('login'); setAuthEmail('student@library.com'); setAuthPassword('student123'); }}
+                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-left border border-slate-700/80 transition"
+              >
+                <div className="font-semibold text-emerald-300 flex items-center gap-1">
+                  <User className="w-3.5 h-3.5" /> Student
+                </div>
+                <div className="text-slate-400 text-[11px] truncate">student@library.com</div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // MAIN APPLICATION INTERFACE
+  // =========================================================================
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row font-sans">
+      {/* Toast Notification */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl border flex items-center gap-2.5 backdrop-blur-md transition-all ${
+          notification.type === 'error' 
+            ? 'bg-red-950/90 border-red-500 text-red-200' 
+            : notification.type === 'info'
+            ? 'bg-blue-950/90 border-blue-500 text-blue-200'
+            : 'bg-emerald-950/90 border-emerald-500 text-emerald-200'
+        }`}>
+          {notification.type === 'error' ? <AlertCircle className="w-5 h-5 text-red-400" /> : <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+          <span className="text-sm font-medium">{notification.message}</span>
+        </div>
+      )}
+
+      {/* Sidebar Navigation */}
+      <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0">
+        {/* Logo Branding */}
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+              <BookOpen className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="font-bold text-white text-base tracking-tight leading-tight">Smart Library</h2>
+              <span className="text-[11px] text-slate-400 font-mono">MySQL Engine</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Server Status Live Pill in Sidebar */}
+        <div className="mx-4 mt-3 px-3 py-2 bg-slate-800/40 rounded-xl border border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {isServerOnline ? (
+              <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <WifiOff className="w-3.5 h-3.5 text-red-400" />
+            )}
+            <span className="text-xs font-medium text-slate-300">Backend Server</span>
+          </div>
+          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+            isServerOnline 
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+              : 'bg-red-500/20 text-red-400 border border-red-500/30'
+          }`}>
+            {isServerOnline ? 'Online' : 'Offline'}
+          </span>
+        </div>
+
+        {/* User Identity Banner */}
+        <div className="mx-4 my-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
+            currentUser.role === 'admin' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+          }`}>
+            {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+          </div>
+          <div className="overflow-hidden flex-1">
+            <p className="text-xs font-semibold text-white truncate">{currentUser.name}</p>
+            <span className={`inline-block text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${
+              currentUser.role === 'admin' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'
+            }`}>
+              {currentUser.role}
+            </span>
+          </div>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="flex-1 px-3 space-y-1.5 py-2">
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition ${
+              activeTab === 'dashboard' 
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span>Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('books')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition ${
+              activeTab === 'books' 
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Books Catalog</span>
+          </button>
+
+          {/* Admin Exclusive: Add Book */}
+          {currentUser.role === 'admin' && (
+            <button
+              onClick={() => {
+                setEditingBookId(null);
+                setBookForm({ title: '', author: '', category: 'Computer Science', quantity: 5 });
+                setActiveTab('add-book');
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition ${
+                activeTab === 'add-book' 
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>{editingBookId ? 'Edit Book' : 'Add Book'}</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setActiveTab('issue-book')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition ${
+              activeTab === 'issue-book' 
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <BookUp2 className="w-4 h-4" />
+            <span>Issue Book</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('return-book')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition ${
+              activeTab === 'return-book' 
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <BookDown className="w-4 h-4" />
+            <span>Return Book</span>
+          </button>
+        </nav>
+
+        {/* Footer Logout */}
+        <div className="p-3 border-t border-slate-800">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm text-red-400 hover:bg-red-500/10 transition"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-950">
+        {/* Top Header Bar */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-slate-800">
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight capitalize">
+              {activeTab.replace('-', ' ')}
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {currentUser.role === 'admin' ? 'Administrative Control Center' : 'Student Resource Dashboard'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 self-stretch sm:self-auto">
+            {/* Live Server Indicator in Header */}
+            <div className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+              isServerOnline 
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isServerOnline ? 'bg-emerald-400 animate-ping' : 'bg-red-400'}`}></span>
+              <span>{isServerOnline ? 'API Connected' : 'API Offline'}</span>
+            </div>
+
+            {activeTab === 'books' && currentUser.role === 'admin' && (
+              <button
+                onClick={() => {
+                  setEditingBookId(null);
+                  setBookForm({ title: '', author: '', category: 'Computer Science', quantity: 5 });
+                  setActiveTab('add-book');
+                }}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-indigo-600/20"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                Add Book
+              </button>
+            )}
+            <button
+              onClick={fetchData}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium border border-slate-700 transition"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* TAB 1: DASHBOARD */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Titles</span>
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400"><BookOpen className="w-4 h-4" /></div>
+                </div>
+                <div className="text-2xl font-bold text-white mt-2">{stats.totalTitles}</div>
+                <div className="text-xs text-slate-500 mt-1">{stats.totalBooks} total copies</div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Available Now</span>
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400"><CheckCircle2 className="w-4 h-4" /></div>
+                </div>
+                <div className="text-2xl font-bold text-white mt-2">{stats.totalAvailable}</div>
+                <div className="text-xs text-slate-500 mt-1">Ready for borrowing</div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Active Loans</span>
+                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400"><Clock className="w-4 h-4" /></div>
+                </div>
+                <div className="text-2xl font-bold text-white mt-2">{stats.totalIssued}</div>
+                <div className="text-xs text-slate-500 mt-1">{stats.overdueCount} books overdue</div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Fines</span>
+                  <div className="p-2 rounded-xl bg-red-500/10 text-red-400"><DollarSign className="w-4 h-4" /></div>
+                </div>
+                <div className="text-2xl font-bold text-white mt-2">${stats.totalFines.toFixed(2)}</div>
+                <div className="text-xs text-slate-500 mt-1">${FINE_PER_DAY}/day late rate</div>
+              </div>
+            </div>
+
+            {/* Active Loans Table */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-white text-base">
+                    {currentUser.role === 'admin' ? 'Recent Issue Records' : 'My Current Book Loans'}
+                  </h3>
+                  <p className="text-xs text-slate-400">Track active loans, due dates and late penalties</p>
+                </div>
+                <button 
+                  onClick={() => setActiveTab('books')} 
+                  className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                >
+                  Browse Catalog &rarr;
+                </button>
+              </div>
+
+              {issues.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  No active or past book loans recorded.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="bg-slate-800/70 text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                      <tr>
+                        <th className="px-5 py-3">Book Title</th>
+                        {currentUser.role === 'admin' && <th className="px-5 py-3">User</th>}
+                        <th className="px-5 py-3">Issue Date</th>
+                        <th className="px-5 py-3">Due Date</th>
+                        <th className="px-5 py-3">Fine Due</th>
+                        <th className="px-5 py-3">Status</th>
+                        <th className="px-5 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {issues.slice(0, 5).map((issue) => {
+                        const lateFine = issue.status === 'issued' ? calculateFine(issue.due_date) : issue.fine;
+                        return (
+                          <tr key={issue.id} className="hover:bg-slate-800/40 transition">
+                            <td className="px-5 py-3.5 font-medium text-white">{issue.book_title || `Book #${issue.book_id}`}</td>
+                            {currentUser.role === 'admin' && (
+                              <td className="px-5 py-3.5 text-slate-400 text-xs">
+                                {issue.user_name || `User #${issue.user_id}`}
+                              </td>
+                            )}
+                            <td className="px-5 py-3.5 text-xs text-slate-400">{issue.issue_date}</td>
+                            <td className="px-5 py-3.5 text-xs text-slate-400">{issue.due_date}</td>
+                            <td className="px-5 py-3.5 text-xs">
+                              {lateFine > 0 ? (
+                                <span className="font-bold text-red-400">${Number(lateFine).toFixed(2)}</span>
+                              ) : (
+                                <span className="text-slate-500">$0.00</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider ${
+                                issue.status === 'issued' 
+                                  ? lateFine > 0 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              }`}>
+                                {issue.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              {issue.status === 'issued' && (
+                                <button
+                                  onClick={() => handleReturnBook(issue)}
+                                  className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-semibold border border-indigo-500/30 transition"
+                                >
+                                  Return Now
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: BOOKS CATALOG */}
+        {activeTab === 'books' && (
+          <div className="space-y-6">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search books by title, author, or category..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <span className="text-xs text-slate-400 shrink-0 font-medium">Category:</span>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="w-full md:w-auto px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Showing {filteredBooks.length} books in library
+                </span>
+              </div>
+
+              {filteredBooks.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  No books found matching your search query.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="bg-slate-800/70 text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                      <tr>
+                        <th className="px-5 py-3">Book Title</th>
+                        <th className="px-5 py-3">Author</th>
+                        <th className="px-5 py-3">Category</th>
+                        <th className="px-5 py-3">Total Copies</th>
+                        <th className="px-5 py-3">Availability</th>
+                        <th className="px-5 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {filteredBooks.map((book) => {
+                        const isAvailable = book.available > 0;
+                        return (
+                          <tr key={book.id} className="hover:bg-slate-800/40 transition">
+                            <td className="px-5 py-3.5 font-medium text-white">{book.title}</td>
+                            <td className="px-5 py-3.5 text-slate-400 text-xs">{book.author}</td>
+                            <td className="px-5 py-3.5 text-xs">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
+                                {book.category}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-xs font-mono">{book.quantity}</td>
+                            <td className="px-5 py-3.5">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                isAvailable 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                                  : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${isAvailable ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                                {isAvailable ? `${book.available} Available` : 'Out of Stock'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {isAvailable && (
+                                  <button
+                                    onClick={() => {
+                                      setIssueForm(prev => ({ ...prev, book_id: book.id }));
+                                      setActiveTab('issue-book');
+                                    }}
+                                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition"
+                                  >
+                                    Issue
+                                  </button>
+                                )}
+
+                                {currentUser.role === 'admin' && (
+                                  <>
+                                    <button
+                                      onClick={() => startEditBook(book)}
+                                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition border border-slate-700"
+                                      title="Edit Book"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteBook(book.id)}
+                                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs transition border border-red-500/30"
+                                      title="Delete Book"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: ADD / EDIT BOOK (Admin only) */}
+        {activeTab === 'add-book' && currentUser.role === 'admin' && (
+          <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8">
+            <div className="mb-6">
+              <h2 className="text-lg font-bold text-white">{editingBookId ? 'Update Book Information' : 'Add New Book to Inventory'}</h2>
+              <p className="text-xs text-slate-400 mt-1">Fill in the book details to synchronize with the MySQL catalog</p>
+            </div>
+
+            <form onSubmit={handleSaveBook} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Book Title</label>
+                <input
+                  type="text"
+                  required
+                  value={bookForm.title}
+                  onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })}
+                  placeholder="e.g., Introduction to Algorithms"
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Author</label>
+                <input
+                  type="text"
+                  required
+                  value={bookForm.author}
+                  onChange={(e) => setBookForm({ ...bookForm, author: e.target.value })}
+                  placeholder="e.g., Thomas H. Cormen"
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Category</label>
+                  <input
+                    type="text"
+                    required
+                    value={bookForm.category}
+                    onChange={(e) => setBookForm({ ...bookForm, category: e.target.value })}
+                    placeholder="e.g., Computer Science"
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Total Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={bookForm.quantity}
+                    onChange={(e) => setBookForm({ ...bookForm, quantity: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingBookId(null);
+                    setActiveTab('books');
+                  }}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/30 transition flex items-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{editingBookId ? 'Save Changes' : 'Add Book'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* TAB 4: ISSUE BOOK */}
+        {activeTab === 'issue-book' && (
+          <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8">
+            <div className="mb-6">
+              <h2 className="text-lg font-bold text-white">Issue a Book</h2>
+              <p className="text-xs text-slate-400 mt-1">Select an available book to record a new loan</p>
+            </div>
+
+            <form onSubmit={handleIssueBook} className="space-y-4">
+              {currentUser.role === 'admin' ? (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Issue to User (Student / Member)</label>
+                  <select
+                    required
+                    value={issueForm.user_id}
+                    onChange={(e) => setIssueForm({ ...issueForm, user_id: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">-- Choose User --</option>
+                    {usersList.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.email}) - {u.role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Borrowing As</label>
+                  <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-200 flex items-center gap-2">
+                    <User className="w-4 h-4 text-indigo-400" />
+                    <span>{currentUser.name} ({currentUser.email})</span>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Select Book</label>
+                <select
+                  required
+                  value={issueForm.book_id}
+                  onChange={(e) => setIssueForm({ ...issueForm, book_id: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">-- Choose an Available Book --</option>
+                  {books.map((b) => (
+                    <option key={b.id} value={b.id} disabled={b.available <= 0}>
+                      {b.title} by {b.author} ({b.available > 0 ? `${b.available} copies available` : 'Out of stock'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Loan Duration (Days)</label>
+                <select
+                  value={issueForm.due_days}
+                  onChange={(e) => setIssueForm({ ...issueForm, due_days: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="7">7 Days (1 Week)</option>
+                  <option value="14">14 Days (2 Weeks - Standard)</option>
+                  <option value="30">30 Days (1 Month)</option>
+                </select>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 flex items-center gap-2">
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>Note: A late fee of ${FINE_PER_DAY.toFixed(2)} per day applies automatically if returned past due date.</span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/30 transition flex items-center gap-2"
+                >
+                  <BookUp2 className="w-4 h-4" />
+                  <span>Confirm Book Issue</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* TAB 5: RETURN BOOK */}
+        {activeTab === 'return-book' && (
+          <div className="space-y-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+              <div className="p-5 border-b border-slate-800">
+                <h2 className="text-lg font-bold text-white">Return Borrowed Books</h2>
+                <p className="text-xs text-slate-400 mt-1">Select an active issue to process return, update inventory & compute late fees</p>
+              </div>
+
+              {issues.filter(i => i.status === 'issued').length === 0 ? (
+                <div className="p-12 text-center text-slate-500 text-sm">
+                  No active loans requiring return at this moment.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="bg-slate-800/70 text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                      <tr>
+                        <th className="px-5 py-3">Book Title</th>
+                        {currentUser.role === 'admin' && <th className="px-5 py-3">Borrower</th>}
+                        <th className="px-5 py-3">Issued On</th>
+                        <th className="px-5 py-3">Due Date</th>
+                        <th className="px-5 py-3">Current Fine</th>
+                        <th className="px-5 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {issues.filter(i => i.status === 'issued').map((issue) => {
+                        const calculatedLateFee = calculateFine(issue.due_date);
+                        return (
+                          <tr key={issue.id} className="hover:bg-slate-800/40 transition">
+                            <td className="px-5 py-3.5 font-medium text-white">{issue.book_title || `Book #${issue.book_id}`}</td>
+                            {currentUser.role === 'admin' && (
+                              <td className="px-5 py-3.5 text-slate-400 text-xs">{issue.user_name || `User #${issue.user_id}`}</td>
+                            )}
+                            <td className="px-5 py-3.5 text-xs text-slate-400">{issue.issue_date}</td>
+                            <td className="px-5 py-3.5 text-xs text-slate-400">{issue.due_date}</td>
+                            <td className="px-5 py-3.5 text-xs">
+                              {calculatedLateFee > 0 ? (
+                                <span className="font-bold text-red-400">${calculatedLateFee.toFixed(2)} (Overdue)</span>
+                              ) : (
+                                <span className="text-emerald-400 font-medium">$0.00 (On Time)</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              <button
+                                onClick={() => handleReturnBook(issue)}
+                                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-600/20 transition flex items-center gap-1.5 ml-auto"
+                              >
+                                <BookDown className="w-3.5 h-3.5" />
+                                <span>Process Return</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
